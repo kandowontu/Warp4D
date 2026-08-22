@@ -33,6 +33,7 @@ internal sealed class MainForm : Form, IMessageFilter
     private TrackBar? _cameraSlider;
     private TrackBar? _opacitySlider;
     private TrackBar? _crossSectionsSlider;
+    private TrackBar? _projectionRotationSpreadSlider;
     private TrackBar? _xyRotationSlider;
     private TrackBar? _xwRotationSlider;
     private TrackBar? _ywRotationSlider;
@@ -211,8 +212,16 @@ internal sealed class MainForm : Form, IMessageFilter
         _crossSectionsSlider = crossSections.Controls.OfType<TrackBar>().Single();
         stack.Controls.Add(crossSections);
 
+        Control projectionRotationSpread = MakeSliderRow("PER-PROJECTION ROTATION", 0, 180, 58, value =>
+        {
+            _renderer.ProjectionRotationSpreadDegrees = value;
+            ProjectionSettingChanged();
+        });
+        _projectionRotationSpreadSlider = projectionRotationSpread.Controls.OfType<TrackBar>().Single();
+        stack.Controls.Add(projectionRotationSpread);
+
         Label rotationHelp = MakeLabel(
-            "ROTATION PLANES\nXW / YW / ZW rotate through W\nXY / XZ / YZ rotate spatial axes",
+            "ROTATION PLANES\nEach projected sheet gets a distinct 6-plane rotation.\nXW / YW / ZW rotate through W\nXY / XZ / YZ rotate spatial axes",
             8,
             MutedColor,
             FontStyle.Bold);
@@ -283,7 +292,13 @@ internal sealed class MainForm : Form, IMessageFilter
         Button resetCamera = MakeButton("RESET ALL ROTATIONS", secondary: true);
         resetCamera.Width = 246;
         resetCamera.Margin = new Padding(0, 5, 0, 20);
-        resetCamera.Click += (_, _) => _renderer.ResetCamera();
+        resetCamera.Click += (_, _) =>
+        {
+            _renderer.ProjectionCycleSeconds = 0;
+            _renderer.ProjectionRotationSpreadDegrees = 58;
+            SetSliderValue(_projectionRotationSpreadSlider, 58);
+            _renderer.ResetCamera();
+        };
         stack.Controls.Add(resetCamera);
 
         CheckBox labels = new()
@@ -345,7 +360,9 @@ internal sealed class MainForm : Form, IMessageFilter
 
     private void ApplyProjectionCycle(bool invalidateRenderer)
     {
-        ProjectionCycleValues values = ProjectionCycle.Sample(_projectionCycleClock.Elapsed.TotalSeconds);
+        double elapsedSeconds = _projectionCycleClock.Elapsed.TotalSeconds;
+        ProjectionCycleValues values = ProjectionCycle.Sample(elapsedSeconds);
+        _renderer.ProjectionCycleSeconds = elapsedSeconds;
         _batchingProjectionValues = true;
         try
         {

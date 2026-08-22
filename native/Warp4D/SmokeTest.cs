@@ -465,6 +465,38 @@ internal static class SmokeTest
             }
             renderer.ProjectionOpacity = 0.18f;
 
+            using Bitmap sharedProjectionRotation = new(renderer.Width, renderer.Height, PixelFormat.Format32bppArgb);
+            using Bitmap independentProjectionRotation = new(renderer.Width, renderer.Height, PixelFormat.Format32bppArgb);
+            renderer.ProjectionCycleSeconds = 0;
+            renderer.ProjectionRotationSpreadDegrees = 0;
+            renderer.DrawToBitmap(sharedProjectionRotation, new Rectangle(Point.Empty, sharedProjectionRotation.Size));
+            renderer.ProjectionRotationSpreadDegrees = 58;
+            renderer.DrawToBitmap(independentProjectionRotation, new Rectangle(Point.Empty, independentProjectionRotation.Size));
+            int independentProjectionChangedPixels = CountDifferentPixels(
+                sharedProjectionRotation,
+                independentProjectionRotation);
+            if (independentProjectionChangedPixels < 500)
+            {
+                throw new InvalidOperationException(
+                    "Per-projection rotation did not separate the individual projection sheets.");
+            }
+
+            using Bitmap projectionCycleStart = new(renderer.Width, renderer.Height, PixelFormat.Format32bppArgb);
+            using Bitmap projectionCycleLater = new(renderer.Width, renderer.Height, PixelFormat.Format32bppArgb);
+            renderer.ProjectionCycleSeconds = 0;
+            renderer.DrawToBitmap(projectionCycleStart, new Rectangle(Point.Empty, projectionCycleStart.Size));
+            renderer.ProjectionCycleSeconds = 3.75;
+            renderer.DrawToBitmap(projectionCycleLater, new Rectangle(Point.Empty, projectionCycleLater.Size));
+            int independentProjectionCycleChangedPixels = CountDifferentPixels(
+                projectionCycleStart,
+                projectionCycleLater);
+            if (independentProjectionCycleChangedPixels < 500)
+            {
+                throw new InvalidOperationException(
+                    "Automatic cycling did not rotate individual projection sheets independently.");
+            }
+            renderer.ProjectionCycleSeconds = 0;
+
             using Bitmap defaultRotation = new(renderer.Width, renderer.Height, PixelFormat.Format32bppArgb);
             renderer.ResetCamera();
             renderer.DrawToBitmap(defaultRotation, new Rectangle(Point.Empty, defaultRotation.Size));
@@ -504,6 +536,9 @@ internal static class SmokeTest
                 HyperprismVertices = 16,
                 HyperprismEdges = 32,
                 RotationPlanes = 6,
+                IndependentRotationPerProjection = true,
+                IndependentProjectionChangedPixels = independentProjectionChangedPixels,
+                IndependentProjectionCycleChangedPixels = independentProjectionCycleChangedPixels,
                 RotationChangedPixels = rotationChangedPixels,
                 StableSmbViewportValidated = true,
                 AutoCycleValidated = true,

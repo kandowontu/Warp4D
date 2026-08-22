@@ -30,6 +30,8 @@ internal sealed class WarpRendererControl : Control
     public float Perspective { get; set; } = 0.55f;
     public float ProjectionOpacity { get; set; } = 0.18f;
     public int SliceCount { get; set; } = 3;
+    public float ProjectionRotationSpreadDegrees { get; set; } = 58f;
+    public double ProjectionCycleSeconds { get; set; }
     public float AngleXYDegrees
     {
         get => ToDegrees(_rotation.XY);
@@ -186,12 +188,21 @@ internal sealed class WarpRendererControl : Control
         float layerOpacity = Math.Clamp(ProjectionOpacity, 0, 1);
         if (layerOpacity > 0.005f)
         {
-            DrawSpriteWBody(graphics, item, context, layerOpacity, brushes);
+            Sheet4D negativeW = sheets.MinBy(static sheet => sheet.W);
+            Sheet4D positiveW = sheets.MaxBy(static sheet => sheet.W);
+            DrawSpriteWBody(
+                graphics,
+                item,
+                context,
+                negativeW.Rotation,
+                positiveW.Rotation,
+                layerOpacity,
+                brushes);
             foreach (Sheet4D sheet in sheets)
             {
                 if (!sheet.IsOriginal)
                 {
-                    DrawPixelSheet(graphics, item, context, sheet.Z, sheet.W, layerOpacity, imageAttributes);
+                    DrawPixelSheet(graphics, item, context, sheet, layerOpacity, imageAttributes);
                 }
             }
         }
@@ -199,7 +210,7 @@ internal sealed class WarpRendererControl : Control
         // The central NES sprite remains opaque so gameplay stays readable as the
         // surrounding 4D layers fade in and out.
         Sheet4D original = sheets.First(sheet => sheet.IsOriginal);
-        DrawPixelSheet(graphics, item, context, original.Z, original.W, 1f, imageAttributes);
+        DrawPixelSheet(graphics, item, context, original, 1f, imageAttributes);
         DrawHyperframe(graphics, item, context, hovered);
     }
 
@@ -236,18 +247,19 @@ internal sealed class WarpRendererControl : Control
             camera3D,
             center,
             screenScale,
+            objectRotation,
             new PreparedRotation4D(objectRotation));
     }
 
     private List<Sheet4D> CreateSheets(ProjectionContext context)
     {
-        List<Sheet4D> sheets = [];
+        List<SheetDescriptor> descriptors = [];
 
         // The two Z extrema expose the third spatial axis. W extrema and optional
         // interior samples below expose the fourth without drawing all four
         // redundant Z/W corner combinations for every object.
-        sheets.Add(NewSheet(context, -context.HalfZ, 0, isOriginal: false, isBoundary: true));
-        sheets.Add(NewSheet(context, context.HalfZ, 0, isOriginal: false, isBoundary: true));
+        descriptors.Add(new SheetDescriptor(-context.HalfZ, 0, IsOriginal: false, IsBoundary: true));
+        descriptors.Add(new SheetDescriptor(context.HalfZ, 0, IsOriginal: false, IsBoundary: true));
 
         // Interior W cross-sections expose how a 3D slice changes across the fourth axis.
         int slices = Math.Clamp(SliceCount, 2, 9);
@@ -259,35 +271,79 @@ internal sealed class WarpRendererControl : Control
             {
                 continue;
             }
-            sheets.Add(NewSheet(context, 0, w, isOriginal: false, isBoundary: false));
+            descriptors.Add(new SheetDescriptor(0, w, IsOriginal: false, IsBoundary: false));
         }
 
         // The actual NES pixels occupy the central XY cross-section of the 4D prism.
-        sheets.Add(NewSheet(context, 0, 0, isOriginal: true, isBoundary: false));
+        descriptors.Add(new SheetDescriptor(0, 0, IsOriginal: true, IsBoundary: false));
+
+        List<Sheet4D> sheets = new(descriptors.Count);
+        for (int index = 0; index < descriptors.Count; index++)
+        {
+            sheets.Add(NewSheet(context, descriptors[index], index, descriptors.Count));
+        }
         return sheets;
     }
 
     private Sheet4D NewSheet(
         ProjectionContext context,
-        float z,
-        float w,
-        bool isOriginal,
-        bool isBoundary)
+        SheetDescriptor descriptor,
+        int index,
+        int count)
     {
+        PreparedRotation4D rotation = descriptor.IsOriginal
+            ? context.BasePreparedRotation
+            : new PreparedRotation4D(CreateProjectionRotation(context, descriptor, index, count));
         float depth =
-            FourDMath.Project(new Vector4F(-context.HalfX, -context.HalfY, z, w), context.Rotation, context.Camera4D, context.Camera3D).CameraDepth +
-            FourDMath.Project(new Vector4F(context.HalfX, -context.HalfY, z, w), context.Rotation, context.Camera4D, context.Camera3D).CameraDepth +
-            FourDMath.Project(new Vector4F(-context.HalfX, context.HalfY, z, w), context.Rotation, context.Camera4D, context.Camera3D).CameraDepth +
-            FourDMath.Project(new Vector4F(context.HalfX, context.HalfY, z, w), context.Rotation, context.Camera4D, context.Camera3D).CameraDepth;
-        return new Sheet4D(z, w, depth / 4f, isOriginal, isBoundary);
+            FourDMath.Project(new Vector4F(-context.HalfX, -context.HalfY, descriptor.Z, descriptor.W), rotation, context.Camera4D, context.Camera3D).CameraDepth +
+            FourDMath.Project(new Vector4F(context.HalfX, -context.HalfY, descriptor.Z, descriptor.W), rotation, context.Camera4D, context.Camera3D).CameraDepth +
+            FourDMath.Project(new Vector4F(-context.HalfX, context.HalfY, descriptor.Z, descriptor.W), rotation, context.Camera4D, context.Camera3D).CameraDepth +
+            FourDMath.Project(new Vector4F(context.HalfX, context.HalfY, descriptor.Z, descriptor.W), rotation, context.Camera4D, context.Camera3D).CameraDepth;
+        return new Sheet4D(
+            descriptor.Z,
+            descriptor.W,
+            depth / 4f,
+            descriptor.IsOriginal,
+            descriptor.IsBoundary,
+            rotation);
+    }
+
+    private Rotation4D CreateProjectionRotation(
+        ProjectionContext context,
+        SheetDescriptor descriptor,
+        int index,
+        int count)
+    {
+        float spread = ToRadians(Math.Clamp(ProjectionRotationSpreadDegrees, 0f, 180f));
+        if (spread <= 0.0001f)
+        {
+            return context.BaseRotation;
+        }
+
+        float normalizedZ = context.HalfZ <= 0.0001f ? 0f : descriptor.Z / context.HalfZ;
+        float normalizedW = context.HalfW <= 0.0001f ? 0f : descriptor.W / context.HalfW;
+        float ordinal = count <= 1 ? 0f : index / (count - 1f);
+        float phase = (normalizedZ * 1.73f) + (normalizedW * 2.41f) + (ordinal * 4.19f);
+        float time = (float)ProjectionCycleSeconds;
+        float speed = 0.38f + (index * 0.071f);
+
+        // Each visible projection sheet has its own transform. The distinct
+        // phases and rates keep sheets from moving as one rigid stack when the
+        // automatic rotation cycle is enabled.
+        return new Rotation4D(
+            context.BaseRotation.XW + spread * 0.70f * MathF.Sin(phase + time * speed),
+            context.BaseRotation.YW + spread * 0.62f * MathF.Sin(phase * 1.37f - time * (speed + 0.13f) + 1.11f),
+            context.BaseRotation.ZW + spread * 0.76f * MathF.Cos(phase * 1.83f + time * (speed + 0.23f) + 0.47f),
+            context.BaseRotation.XZ + spread * 0.43f * MathF.Sin(phase * 2.17f - time * (speed + 0.31f) + 2.03f),
+            context.BaseRotation.YZ + spread * 0.39f * MathF.Cos(phase * 2.53f + time * (speed + 0.19f) + 0.83f),
+            context.BaseRotation.XY + spread * 0.31f * MathF.Sin(phase * 2.89f - time * (speed + 0.27f) + 2.71f));
     }
 
     private void DrawPixelSheet(
         Graphics graphics,
         SceneObject item,
         ProjectionContext context,
-        float z,
-        float w,
+        Sheet4D sheet,
         float opacity,
         Dictionary<int, ImageAttributes> imageAttributes)
     {
@@ -299,9 +355,18 @@ internal sealed class WarpRendererControl : Control
         {
             PointF[] destination = new PointF[3];
             ImageAttributes? attributes = GetImageAttributes(imageAttributes, opacity);
-            destination[0] = ProjectToScreen(new Vector4F(-context.HalfX, -context.HalfY, z, w), context);
-            destination[1] = ProjectToScreen(new Vector4F(context.HalfX, -context.HalfY, z, w), context);
-            destination[2] = ProjectToScreen(new Vector4F(-context.HalfX, context.HalfY, z, w), context);
+            destination[0] = ProjectToScreen(
+                new Vector4F(-context.HalfX, -context.HalfY, sheet.Z, sheet.W),
+                context,
+                sheet.Rotation);
+            destination[1] = ProjectToScreen(
+                new Vector4F(context.HalfX, -context.HalfY, sheet.Z, sheet.W),
+                context,
+                sheet.Rotation);
+            destination[2] = ProjectToScreen(
+                new Vector4F(-context.HalfX, context.HalfY, sheet.Z, sheet.W),
+                context,
+                sheet.Rotation);
             graphics.DrawImage(
                 item.Image,
                 destination,
@@ -320,6 +385,8 @@ internal sealed class WarpRendererControl : Control
         Graphics graphics,
         SceneObject item,
         ProjectionContext context,
+        PreparedRotation4D negativeWRotation,
+        PreparedRotation4D positiveWRotation,
         float opacity,
         Dictionary<int, SolidBrush> brushes)
     {
@@ -334,10 +401,10 @@ internal sealed class WarpRendererControl : Control
                 float startY = PixelToLocalY(boundary.Start.Y, item.Image.Height, context);
                 float endX = PixelToLocalX(boundary.End.X, item.Image.Width, context);
                 float endY = PixelToLocalY(boundary.End.Y, item.Image.Height, context);
-                surface[0] = ProjectToScreen(new Vector4F(startX, startY, 0, -context.HalfW), context);
-                surface[1] = ProjectToScreen(new Vector4F(endX, endY, 0, -context.HalfW), context);
-                surface[2] = ProjectToScreen(new Vector4F(endX, endY, 0, context.HalfW), context);
-                surface[3] = ProjectToScreen(new Vector4F(startX, startY, 0, context.HalfW), context);
+                surface[0] = ProjectToScreen(new Vector4F(startX, startY, 0, -context.HalfW), context, negativeWRotation);
+                surface[1] = ProjectToScreen(new Vector4F(endX, endY, 0, -context.HalfW), context, negativeWRotation);
+                surface[2] = ProjectToScreen(new Vector4F(endX, endY, 0, context.HalfW), context, positiveWRotation);
+                surface[3] = ProjectToScreen(new Vector4F(startX, startY, 0, context.HalfW), context, positiveWRotation);
                 graphics.FillPolygon(GetBrush(brushes, boundary.Color, opacity), surface);
             }
         }
@@ -359,7 +426,9 @@ internal sealed class WarpRendererControl : Control
             context.HalfY,
             context.HalfZ,
             context.HalfW);
-        PointF[] projected = vertices4D.Select(vertex => ProjectToScreen(vertex, context)).ToArray();
+        PointF[] projected = vertices4D
+            .Select(vertex => ProjectToScreen(vertex, context, context.BasePreparedRotation))
+            .ToArray();
 
         foreach ((int start, int end, int axis) in FourDMath.HyperprismEdges())
         {
@@ -392,9 +461,12 @@ internal sealed class WarpRendererControl : Control
         }
     }
 
-    private PointF ProjectToScreen(Vector4F point, ProjectionContext context)
+    private PointF ProjectToScreen(
+        Vector4F point,
+        ProjectionContext context,
+        PreparedRotation4D rotation)
     {
-        Projected4D projected = FourDMath.Project(point, context.Rotation, context.Camera4D, context.Camera3D);
+        Projected4D projected = FourDMath.Project(point, rotation, context.Camera4D, context.Camera3D);
         return new PointF(
             context.Center.X + projected.Point.X * context.ScreenScale,
             context.Center.Y + projected.Point.Y * context.ScreenScale);
@@ -612,12 +684,20 @@ internal sealed class WarpRendererControl : Control
         float Camera3D,
         PointF Center,
         float ScreenScale,
-        PreparedRotation4D Rotation);
+        Rotation4D BaseRotation,
+        PreparedRotation4D BasePreparedRotation);
 
     private readonly record struct Sheet4D(
         float Z,
         float W,
         float CameraDepth,
+        bool IsOriginal,
+        bool IsBoundary,
+        PreparedRotation4D Rotation);
+
+    private readonly record struct SheetDescriptor(
+        float Z,
+        float W,
         bool IsOriginal,
         bool IsBoundary);
 }

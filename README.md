@@ -2,7 +2,7 @@
 
 Warp4D is a native Windows NES emulator experiment that gives selected game objects a controllable W-axis while keeping gameplay on one readable 2D screen. It is a WinForms desktop application backed by Mesen’s native NES core—there is no browser, HTML, WebView, Node.js, or local web server at runtime.
 
-This build uses an actual four-coordinate geometry pipeline. Each transparent NES sprite bitmap forms sampled XY sheets in `XY × Z × W`, while merged segments from its exact pixel silhouette form the side walls. Geometry supports all six independent rotation planes—XY, XZ, XW, YZ, YW, and ZW—followed by a W-axis perspective divide from R⁴ to R³ and a Z-axis perspective divide from R³ to the monitor. The layers and side surfaces use the sprite’s own pixels and colors—not screen-space offset copies. Hovering an object reveals its 16-vertex, 32-edge diagnostic hyperframe.
+This build uses an actual four-coordinate geometry pipeline. Each transparent NES sprite bitmap forms sampled XY sheets in `XY × Z × W`, while merged segments from its exact pixel silhouette form the side walls. Every projected sheet carries its own six-plane rotation transform, with independently phased motion during auto-cycle; the central NES sprite remains the readable anchor. Geometry supports all six rotation planes—XY, XZ, XW, YZ, YW, and ZW—followed by a W-axis perspective divide from R⁴ to R³ and a Z-axis perspective divide from R³ to the monitor. The layers and side surfaces use the sprite’s own pixels and colors—not screen-space offset copies. Hovering an object reveals its 16-vertex, 32-edge diagnostic hyperframe.
 
 The exact **Super Mario Bros. (World)** profile recognizes SHA-256:
 
@@ -25,8 +25,9 @@ Controls:
 - Ctrl+G: open the game-profile creator for the loaded ROM
 - Drag horizontally: XW rotation
 - Drag vertically: YW rotation
-- Sidebar: W extent, 4D camera perspective, true 0–100% layer opacity, W cross-sections, and all six rotation planes (XY, XZ, XW, YZ, YW, ZW)
-- Auto-cycle geometry and rotations: animates W extent, camera proximity, cross-sections, and rotation controls. Opacity always remains at its manually selected value.
+- Sidebar: W extent, 4D camera perspective, true 0–100% layer opacity, W cross-sections, per-projection rotation spread, and all six base rotation planes (XY, XZ, XW, YZ, YW, ZW)
+- Per-projection rotation: controls how far the individual sheets of each 4D object diverge from its base rotation. Set it to 0° for a rigid stack or increase it for independently oriented projections.
+- Auto-cycle geometry and rotations: animates W extent, camera proximity, cross-sections, base rotation controls, and every projection sheet at its own phase and rate. Opacity and per-projection spread remain at their manually selected values.
 - Projection: enable or disable 4D projection per recognized object class, adjust each class from 25–200% relative depth, apply character/scenery presets, and import or export shareable `.warp4d.json` projection profiles. Disabled classes remain visible as ordinary 2D NES objects.
 - Game Profile: create recognition profiles for other games. The creator displays a live 16×16 metatile grid from the loaded ROM; click each distinct piece of a bush, pipe, platform, block, or other background object and assign its class and label. Captured pieces with the same label are joined into whole objects at runtime. New and updated rules bind both the tile numbers and visible tile artwork, preventing a graphics-bank swap from misidentifying menu art as gameplay scenery. Profiles can be imported or exported as `.warp4d-game.json` files.
 
