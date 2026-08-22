@@ -1,11 +1,13 @@
+using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Warp4D.Emulation;
 
 namespace Warp4D.Profiles;
 
 internal sealed class GameRecognitionProfile
 {
-    public const int CurrentFormatVersion = 1;
+    public const int CurrentFormatVersion = 2;
 
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     public string Name { get; set; } = "Custom game profile";
@@ -20,8 +22,30 @@ internal sealed class GameRecognitionProfile
         RomSha256 = romSha256
     };
 
-    public BackgroundObjectRule? Match(MetatileSignature signature) =>
-        BackgroundRules.TryGetValue(signature.Key, out BackgroundObjectRule? rule) ? rule : null;
+    public BackgroundObjectRule? Match(
+        MetatileSignature signature,
+        NesFrame frame,
+        int worldTileX,
+        int worldTileY)
+    {
+        if (!BackgroundRules.TryGetValue(signature.Key, out BackgroundObjectRule? rule))
+        {
+            return null;
+        }
+
+        // Profiles created by 1.0 only stored tile numbers. Keep those files
+        // working; re-selecting a pattern in the editor upgrades it to artwork-
+        // aware matching and prevents CHR-bank aliases on menus/title screens.
+        if (!rule.HasVisualFingerprint)
+        {
+            return rule;
+        }
+
+        string visibleArtwork = MetatileVisualFingerprint.Read(frame, worldTileX, worldTileY);
+        return visibleArtwork.Equals(rule.VisualFingerprint, StringComparison.OrdinalIgnoreCase)
+            ? rule
+            : null;
+    }
 
     public GameRecognitionProfile Clone()
     {
@@ -72,9 +96,18 @@ internal sealed class GameRecognitionProfile
                 ? ProjectionProfile.DisplayName(kind)
                 : rule.Label.Trim();
             if (rule.Label.Length > 48) rule.Label = rule.Label[..48];
+            rule.VisualFingerprint = NormalizeFingerprint(rule.VisualFingerprint);
             normalized[key.ToUpperInvariant()] = rule;
         }
         BackgroundRules = normalized;
+    }
+
+    private static string NormalizeFingerprint(string? fingerprint)
+    {
+        string normalized = (fingerprint ?? string.Empty).Trim().ToUpperInvariant();
+        return normalized.Length == 64 && normalized.All(Uri.IsHexDigit)
+            ? normalized
+            : string.Empty;
     }
 }
 
@@ -82,15 +115,51 @@ internal sealed class BackgroundObjectRule
 {
     public string Kind { get; set; } = SceneObjectKind.Terrain.ToString();
     public string Label { get; set; } = "Object";
+    public string VisualFingerprint { get; set; } = string.Empty;
 
+    [JsonIgnore]
     public SceneObjectKind ObjectKind =>
         Enum.TryParse(Kind, ignoreCase: true, out SceneObjectKind kind) ? kind : SceneObjectKind.Terrain;
+    [JsonIgnore]
+    public bool HasVisualFingerprint => VisualFingerprint.Length == 64;
 
     public BackgroundObjectRule Clone() => new()
     {
         Kind = Kind,
-        Label = Label
+        Label = Label,
+        VisualFingerprint = VisualFingerprint
     };
+}
+
+internal static class MetatileVisualFingerprint
+{
+    public static string Read(NesFrame frame, int worldTileX, int worldTileY)
+    {
+        Span<byte> canonicalPixels = stackalloc byte[16 * 16];
+        Dictionary<int, byte> colorIds = [];
+        byte nextColorId = 0;
+
+        for (int pixelY = 0; pixelY < 16; pixelY++)
+        for (int pixelX = 0; pixelX < 16; pixelX++)
+        {
+            int worldPixelX = Mod(worldTileX * 8 + pixelX, 512);
+            int worldPixelY = Mod(worldTileY * 8 + pixelY, 480);
+            int table = (worldPixelX >= 256 ? 1 : 0) + (worldPixelY >= 240 ? 2 : 0);
+            int localX = worldPixelX & 0xFF;
+            int localY = worldPixelY % 240;
+            int rgb = frame.NametablePixels[table][localY * 256 + localX] & 0x00FFFFFF;
+            if (!colorIds.TryGetValue(rgb, out byte colorId))
+            {
+                colorId = nextColorId++;
+                colorIds[rgb] = colorId;
+            }
+            canonicalPixels[pixelY * 16 + pixelX] = colorId;
+        }
+
+        return Convert.ToHexString(SHA256.HashData(canonicalPixels));
+    }
+
+    private static int Mod(int value, int modulus) => (value % modulus + modulus) % modulus;
 }
 
 internal readonly record struct MetatileSignature(

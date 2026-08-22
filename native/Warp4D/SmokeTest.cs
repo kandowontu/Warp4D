@@ -9,6 +9,73 @@ namespace Warp4D;
 
 internal static class SmokeTest
 {
+    public static int RunScrollCapture(string romPath, string outputPath)
+    {
+        string absoluteOutput = Path.GetFullPath(outputPath);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(absoluteOutput)!);
+            using NesEmulator emulator = new();
+            emulator.Load(romPath);
+            string[] watchedSignatures =
+            [
+                "P1-50605161", "P1-52625363", "P1-70807181", "P1-72827383"
+            ];
+            List<object> phases = [];
+            Thread.Sleep(1200);
+            for (int phase = 0; phase < 6; phase++)
+            {
+                NesFrame frame = emulator.CaptureFrame() ?? throw new InvalidOperationException("No frame was captured.");
+                phases.Add(new { Phase = phase, Frame = CaptureSignatureVisuals(frame, watchedSignatures) });
+                PulseButton(emulator, NesButton.Start);
+                Thread.Sleep(1300);
+            }
+            File.WriteAllText(absoluteOutput, JsonSerializer.Serialize(phases, new JsonSerializerOptions { WriteIndented = true }));
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            File.WriteAllText(Path.ChangeExtension(absoluteOutput, ".error.txt"), exception.ToString());
+            return 1;
+        }
+    }
+
+    private static object CaptureSignatureVisuals(NesFrame frame, IReadOnlyCollection<string> watchedSignatures)
+    {
+        List<object> matches = [];
+        for (int worldTileY = 0; worldTileY < 60; worldTileY += 2)
+        for (int worldTileX = 0; worldTileX < 64; worldTileX += 2)
+        {
+            MetatileSignature signature = MetatileSignature.Read(frame, worldTileX, worldTileY);
+            if (watchedSignatures.Contains(signature.Key))
+            {
+                matches.Add(new
+                {
+                    signature.Key,
+                    X = worldTileX,
+                    Y = worldTileY,
+                    Visual = MetatileVisualFingerprint.Read(frame, worldTileX, worldTileY)
+                });
+            }
+        }
+        return new
+        {
+            frame.ScrollX,
+            frame.ScrollY,
+            frame.RawScrollX,
+            frame.RawScrollY,
+            frame.ScrollSource,
+            Matches = matches
+        };
+    }
+
+    private static void PulseButton(NesEmulator emulator, NesButton button)
+    {
+        emulator.SetButton(button, true);
+        Thread.Sleep(120);
+        emulator.SetButton(button, false);
+    }
+
     public static int RunGameProfile(string romPath, string outputPath)
     {
         string absoluteOutput = Path.GetFullPath(outputPath);
@@ -30,7 +97,8 @@ internal static class SmokeTest
             gameProfile.BackgroundRules[signature.Key] = new BackgroundObjectRule
             {
                 Kind = SceneObjectKind.Tree.ToString(),
-                Label = "Captured custom object"
+                Label = "Captured custom object",
+                VisualFingerprint = MetatileVisualFingerprint.Read(frame, worldTileX, worldTileY)
             };
             gameProfile.Normalize();
 
@@ -153,6 +221,7 @@ internal static class SmokeTest
             File.WriteAllText(progressPath, "start\n");
             FourDMath.Validate();
             ProjectionCycle.Validate();
+            ViewportStabilizer.Validate();
             File.AppendAllText(progressPath, "R4 math + projection cycling validated\n");
 
             using NesEmulator emulator = new();
@@ -270,7 +339,11 @@ internal static class SmokeTest
             customGameProfile.BackgroundRules[capturedSignature.Key] = new BackgroundObjectRule
             {
                 Kind = SceneObjectKind.Terrain.ToString(),
-                Label = "Captured ground"
+                Label = "Captured ground",
+                VisualFingerprint = MetatileVisualFingerprint.Read(
+                    frame,
+                    capturedWorldTileX,
+                    capturedWorldTileY)
             };
             customGameProfile.Normalize();
             using SmbScene genericCustomScene = profile.Build(
@@ -290,10 +363,36 @@ internal static class SmokeTest
             string exportedGameProfilePath = Path.ChangeExtension(absoluteOutput, ".warp4d-game.json");
             GameRecognitionProfileStore.WriteToFile(exportedGameProfilePath, customGameProfile);
             GameRecognitionProfile importedGameProfile = GameRecognitionProfileStore.ReadFromFile(exportedGameProfilePath);
-            if (importedGameProfile.Match(capturedSignature)?.Label != "Captured ground" ||
+            if (importedGameProfile.Match(
+                    capturedSignature,
+                    frame,
+                    capturedWorldTileX,
+                    capturedWorldTileY)?.Label != "Captured ground" ||
                 importedGameProfile.RomSha256 != emulator.RomSha256)
             {
                 throw new InvalidOperationException("Game-recognition profile JSON did not round-trip correctly.");
+            }
+
+            int visualWorldX = ((capturedWorldTileX % 64 + 64) % 64) * 8;
+            int visualWorldY = ((capturedWorldTileY % 60 + 60) % 60) * 8;
+            int visualTable = (visualWorldX >= 256 ? 1 : 0) + (visualWorldY >= 240 ? 2 : 0);
+            int visualPixelIndex = (visualWorldY % 240) * 256 + (visualWorldX & 0xFF);
+            int originalVisualPixel = frame.NametablePixels[visualTable][visualPixelIndex];
+            try
+            {
+                frame.NametablePixels[visualTable][visualPixelIndex] ^= 0x00010101;
+                if (importedGameProfile.Match(
+                        capturedSignature,
+                        frame,
+                        capturedWorldTileX,
+                        capturedWorldTileY) is not null)
+                {
+                    throw new InvalidOperationException("A game-profile rule matched different tile artwork from another graphics bank.");
+                }
+            }
+            finally
+            {
+                frame.NametablePixels[visualTable][visualPixelIndex] = originalVisualPixel;
             }
 
             string gameEditorPreviewPath = Path.Combine(

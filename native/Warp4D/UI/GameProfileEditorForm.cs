@@ -366,7 +366,8 @@ internal sealed class GameProfileEditorForm : Form
         _workingProfile.BackgroundRules[signature.Key] = new BackgroundObjectRule
         {
             Kind = choice.Kind.ToString(),
-            Label = label
+            Label = label,
+            VisualFingerprint = _picker.SelectedVisualFingerprint ?? string.Empty
         };
         RefreshRuleList(signature.Key);
         _addButton.Text = "UPDATE PATTERN";
@@ -421,7 +422,10 @@ internal sealed class GameProfileEditorForm : Form
         }
         _rulesList.EndUpdate();
         int count = _workingProfile.BackgroundRules.Count;
-        _ruleCountLabel.Text = $"{count} captured pattern{(count == 1 ? string.Empty : "s")}";
+        int legacyCount = _workingProfile.BackgroundRules.Values.Count(rule => !rule.HasVisualFingerprint);
+        _ruleCountLabel.Text = legacyCount == 0
+            ? $"{count} captured pattern{(count == 1 ? string.Empty : "s")}"
+            : $"{count} captured · {legacyCount} need visual update";
     }
 
     private GameRecognitionProfile ReadProfileFromControls()
@@ -559,7 +563,8 @@ internal sealed class GameProfileEditorForm : Form
 
     private sealed record RuleListItem(string SignatureKey, BackgroundObjectRule Rule)
     {
-        public override string ToString() => $"{SignatureKey}  {Rule.ObjectKind,-13}  {Rule.Label}";
+        public override string ToString() =>
+            $"{SignatureKey}  {(Rule.HasVisualFingerprint ? "VISUAL" : "UPDATE"),-6}  {Rule.ObjectKind,-13}  {Rule.Label}";
     }
 }
 
@@ -574,6 +579,7 @@ internal sealed class TilePickerControl : Control
     private int _selectedWorldTileY;
 
     public MetatileSignature? SelectedSignature { get; private set; }
+    public string? SelectedVisualFingerprint { get; private set; }
     public event EventHandler? SelectionChanged;
 
     public TilePickerControl(NesFrame frame, Bitmap background, bool exactSmbProfile)
@@ -666,6 +672,10 @@ internal sealed class TilePickerControl : Control
         _selectedWorldTileX = (worldPixelX / 8) & ~1;
         _selectedWorldTileY = (worldPixelY / 8) & ~1;
         SelectedSignature = MetatileSignature.Read(_frame, _selectedWorldTileX, _selectedWorldTileY);
+        SelectedVisualFingerprint = MetatileVisualFingerprint.Read(
+            _frame,
+            _selectedWorldTileX,
+            _selectedWorldTileY);
         Invalidate();
         SelectionChanged?.Invoke(this, EventArgs.Empty);
     }

@@ -196,7 +196,13 @@ internal sealed class SmbProfile
             for (int worldTileX = firstMetatileX; worldTileX <= endTileX; worldTileX += 2)
             {
                 MetatileSignature signature = MetatileSignature.Read(frame, worldTileX, worldTileY);
-                BackgroundObjectIdentity? identity = ClassifyMetatile(signature, exactProfile, gameProfile);
+                BackgroundObjectIdentity? identity = ClassifyMetatile(
+                    signature,
+                    exactProfile,
+                    gameProfile,
+                    frame,
+                    worldTileX,
+                    worldTileY);
                 if (identity is not null)
                 {
                     classified[(worldTileX, worldTileY)] = identity.Value;
@@ -249,9 +255,12 @@ internal sealed class SmbProfile
     private static BackgroundObjectIdentity? ClassifyMetatile(
         MetatileSignature signature,
         bool exactProfile,
-        GameRecognitionProfile? gameProfile)
+        GameRecognitionProfile? gameProfile,
+        NesFrame frame,
+        int worldTileX,
+        int worldTileY)
     {
-        BackgroundObjectRule? customRule = gameProfile?.Match(signature);
+        BackgroundObjectRule? customRule = gameProfile?.Match(signature, frame, worldTileX, worldTileY);
         if (customRule is not null)
         {
             return new BackgroundObjectIdentity(customRule.ObjectKind, customRule.Label);

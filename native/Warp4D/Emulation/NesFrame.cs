@@ -15,6 +15,8 @@ internal sealed class NesFrame
     public required byte[] Ram { get; init; }
     public int ScrollX { get; init; }
     public int ScrollY { get; init; }
+    public int RawScrollX { get; init; }
+    public int RawScrollY { get; init; }
     public required string ScrollSource { get; init; }
     public long Sequence { get; init; }
 }

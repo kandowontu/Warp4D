@@ -20,6 +20,10 @@ internal static class Program
         {
             return SmokeTest.RunGameProfile(args[1], args[2]);
         }
+        if (args.Length >= 3 && args[0].Equals("--scroll-smoke", StringComparison.OrdinalIgnoreCase))
+        {
+            return SmokeTest.RunScrollCapture(args[1], args[2]);
+        }
         Application.Run(new MainForm());
         return 0;
     }

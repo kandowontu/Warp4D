@@ -28,9 +28,11 @@ Controls:
 - Sidebar: W extent, 4D camera perspective, true 0–100% layer opacity, W cross-sections, and all six rotation planes (XY, XZ, XW, YZ, YW, ZW)
 - Auto-cycle geometry and rotations: animates W extent, camera proximity, cross-sections, and rotation controls. Opacity always remains at its manually selected value.
 - Projection: enable or disable 4D projection per recognized object class, adjust each class from 25–200% relative depth, apply character/scenery presets, and import or export shareable `.warp4d.json` projection profiles. Disabled classes remain visible as ordinary 2D NES objects.
-- Game Profile: create recognition profiles for other games. The creator displays a live 16×16 metatile grid from the loaded ROM; click each distinct piece of a bush, pipe, platform, block, or other background object and assign its class and label. Captured pieces with the same label are joined into whole objects at runtime. Profiles can be imported or exported as `.warp4d-game.json` files.
+- Game Profile: create recognition profiles for other games. The creator displays a live 16×16 metatile grid from the loaded ROM; click each distinct piece of a bush, pipe, platform, block, or other background object and assign its class and label. Captured pieces with the same label are joined into whole objects at runtime. New and updated rules bind both the tile numbers and visible tile artwork, preventing a graphics-bank swap from misidentifying menu art as gameplay scenery. Profiles can be imported or exported as `.warp4d-game.json` files.
 
 For the exact SMB profile, the viewport is taken from SMB's stable screen-position RAM instead of the PPU register used temporarily for the fixed status bar. This prevents old nametable pages from flickering into the gameplay view.
+
+For other games, a temporal viewport filter rejects one-frame PPU scroll values written for raster splits while preserving normal continuous scrolling and persistent scene transitions. This keeps menus such as FamiDash's title screen anchored instead of jumping between nametable pages.
 
 The SMB title-screen attract demo is recognized as an active level scene, so its bushes, hills, blocks, pipes, and other detected scenery use the same 4D profile as normal gameplay. The static title screen remains 2D until the demo timer actually expires.
 

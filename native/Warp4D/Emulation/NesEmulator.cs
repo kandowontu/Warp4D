@@ -7,6 +7,7 @@ internal sealed class NesEmulator : IDisposable
 {
     private const string SmbWorldSha256 = "F61548FDF1670CFFEFCC4F0B7BDCDD9EABA0C226E3B74F8666071496988248DE";
     private readonly object _nativeLock = new();
+    private readonly ViewportStabilizer _viewportStabilizer = new();
     private bool _initialized;
     private bool _loaded;
     private bool _debugInitialized;
@@ -128,6 +129,7 @@ internal sealed class NesEmulator : IDisposable
             MesenApi.DebugSetInputOverride(0, 0);
             _loaded = true;
             _paused = false;
+            _viewportStabilizer.Reset();
             RomPath = absolutePath;
             StartCoreLoop();
         }
@@ -170,8 +172,10 @@ internal sealed class NesEmulator : IDisposable
             byte[] palette = GetMemory(DebugMemoryType.PaletteMemory, 32);
             byte[] ram = GetMemory(DebugMemoryType.InternalRam, 0x800);
             uint packedScroll = MesenApi.DebugGetPpuScroll();
-            int scrollX = (int)(packedScroll & 0xFFFF);
-            int scrollY = (int)(packedScroll >> 16);
+            int rawScrollX = (int)(packedScroll & 0xFFFF);
+            int rawScrollY = (int)(packedScroll >> 16);
+            int scrollX = rawScrollX;
+            int scrollY = rawScrollY;
             string scrollSource = "PPU register";
 
             if (IsSmbWorld && ram.Length > 0x071C)
@@ -183,6 +187,14 @@ internal sealed class NesEmulator : IDisposable
                 scrollX = (ram[0x071A] << 8) | ram[0x071C];
                 scrollY = 0;
                 scrollSource = "SMB RAM gameplay viewport";
+            }
+            else
+            {
+                (scrollX, scrollY, bool filtered) = _viewportStabilizer.Update(rawScrollX, rawScrollY);
+                if (filtered)
+                {
+                    scrollSource = "stabilized PPU viewport";
+                }
             }
 
             return new NesFrame
@@ -196,6 +208,8 @@ internal sealed class NesEmulator : IDisposable
                 Ram = ram,
                 ScrollX = scrollX,
                 ScrollY = scrollY,
+                RawScrollX = rawScrollX,
+                RawScrollY = rawScrollY,
                 ScrollSource = scrollSource,
                 Sequence = ++_sequence
             };
