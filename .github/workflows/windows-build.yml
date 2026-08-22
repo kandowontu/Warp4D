@@ -1,0 +1,34 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main, "1.0"]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, "1.0"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish self-contained executable
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Warp4D-windows-x64
+          path: |
+            release/Warp4D.exe
+            release/LICENSE.txt
+            release/THIRD_PARTY_NOTICES.md

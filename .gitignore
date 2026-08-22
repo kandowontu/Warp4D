@@ -1,0 +1,25 @@
+bin/
+obj/
+release/
+artifacts/
+node_modules/
+dist/
+.vs/
+test-output/
+laptop/
+src/
+test/
+*.user
+*.suo
+
+# Users provide their own legally obtained ROM dumps. Never commit them.
+roms/
+*.nes
+*.NES
+*.fds
+*.FDS
+*.unf
+*.unif
+*.smc
+*.sfc
+*.zip
