@@ -17,18 +17,19 @@ internal static class SmokeTest
             Directory.CreateDirectory(Path.GetDirectoryName(absoluteOutput)!);
             using NesEmulator emulator = new();
             emulator.Load(romPath);
-            string[] watchedSignatures =
-            [
-                "P1-50605161", "P1-52625363", "P1-70807181", "P1-72827383"
-            ];
             List<object> phases = [];
-            Thread.Sleep(1200);
+            Thread.Sleep(600);
             for (int phase = 0; phase < 6; phase++)
             {
-                NesFrame frame = emulator.CaptureFrame() ?? throw new InvalidOperationException("No frame was captured.");
-                phases.Add(new { Phase = phase, Frame = CaptureSignatureVisuals(frame, watchedSignatures) });
+                List<object> samples = [];
+                for (int sample = 0; sample < 24; sample++)
+                {
+                    Thread.Sleep(50);
+                    NesFrame frame = emulator.CaptureFrame() ?? throw new InvalidOperationException("No frame was captured.");
+                    samples.Add(CaptureViewportSample(frame));
+                }
+                phases.Add(new { Phase = phase, Samples = samples });
                 PulseButton(emulator, NesButton.Start);
-                Thread.Sleep(1300);
             }
             File.WriteAllText(absoluteOutput, JsonSerializer.Serialize(phases, new JsonSerializerOptions { WriteIndented = true }));
             return 0;
@@ -40,24 +41,8 @@ internal static class SmokeTest
         }
     }
 
-    private static object CaptureSignatureVisuals(NesFrame frame, IReadOnlyCollection<string> watchedSignatures)
+    private static object CaptureViewportSample(NesFrame frame)
     {
-        List<object> matches = [];
-        for (int worldTileY = 0; worldTileY < 60; worldTileY += 2)
-        for (int worldTileX = 0; worldTileX < 64; worldTileX += 2)
-        {
-            MetatileSignature signature = MetatileSignature.Read(frame, worldTileX, worldTileY);
-            if (watchedSignatures.Contains(signature.Key))
-            {
-                matches.Add(new
-                {
-                    signature.Key,
-                    X = worldTileX,
-                    Y = worldTileY,
-                    Visual = MetatileVisualFingerprint.Read(frame, worldTileX, worldTileY)
-                });
-            }
-        }
         return new
         {
             frame.ScrollX,
@@ -65,7 +50,13 @@ internal static class SmokeTest
             frame.RawScrollX,
             frame.RawScrollY,
             frame.ScrollSource,
-            Matches = matches
+            FamiDashGameState = frame.Ram.Length > 0x49C ? frame.Ram[0x49C] : -1,
+            FamiDashRamScrollX = frame.Ram.Length > 0x4A9
+                ? frame.Ram[0x4A6] | (frame.Ram[0x4A7] << 8) | (frame.Ram[0x4A8] << 16) | (frame.Ram[0x4A9] << 24)
+                : 0,
+            FamiDashRamScrollY = frame.Ram.Length > 0x4AB
+                ? frame.Ram[0x4AA] | (frame.Ram[0x4AB] << 8)
+                : 0
         };
     }
 
@@ -222,6 +213,7 @@ internal static class SmokeTest
             FourDMath.Validate();
             ProjectionCycle.Validate();
             ViewportStabilizer.Validate();
+            ValidateFamiDashViewport();
             File.AppendAllText(progressPath, "R4 math + projection cycling validated\n");
 
             using NesEmulator emulator = new();
@@ -554,6 +546,27 @@ internal static class SmokeTest
                 // Preserve the original failure as the process exit code.
             }
             return 1;
+        }
+    }
+
+    private static void ValidateFamiDashViewport()
+    {
+        byte[] ram = new byte[0x800];
+        ram[0x49C] = 0x01;
+        if (!NesEmulator.TryGetFamiDashViewport(ram, out int menuX, out int menuY) || menuX != 0 || menuY != 0)
+        {
+            throw new InvalidOperationException("The FamiDash title viewport was not anchored at the origin.");
+        }
+
+        ram[0x49C] = 0x02;
+        ram[0x4A6] = 0x34;
+        ram[0x4A7] = 0x01;
+        ram[0x4AA] = 0xEF;
+        ram[0x4AB] = 0x02;
+        if (!NesEmulator.TryGetFamiDashViewport(ram, out int gameX, out int gameY) ||
+            gameX != 0x134 || gameY != 0xEF)
+        {
+            throw new InvalidOperationException("The FamiDash gameplay viewport did not decode its extended RAM coordinates.");
         }
     }
 

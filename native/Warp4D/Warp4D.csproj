@@ -16,7 +16,7 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>Warp4D</AssemblyName>
     <Product>Warp4D Native NES Object Projector</Product>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <PublishTrimmed>false</PublishTrimmed>
     <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>

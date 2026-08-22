@@ -6,6 +6,10 @@ namespace Warp4D.Emulation;
 internal sealed class NesEmulator : IDisposable
 {
     private const string SmbWorldSha256 = "F61548FDF1670CFFEFCC4F0B7BDCDD9EABA0C226E3B74F8666071496988248DE";
+    private const string FamiDashSha256 = "FDCC6C107CC64A245CE8F07188CBB50558EF435B908105F4CC88004D205BDA26";
+    private const int FamiDashGameStateAddress = 0x049C;
+    private const int FamiDashScrollXAddress = 0x04A6;
+    private const int FamiDashScrollYAddress = 0x04AA;
     private readonly object _nativeLock = new();
     private readonly ViewportStabilizer _viewportStabilizer = new();
     private bool _initialized;
@@ -19,6 +23,7 @@ internal sealed class NesEmulator : IDisposable
     public string? RomPath { get; private set; }
     public bool IsLoaded => _loaded;
     public bool IsSmbWorld { get; private set; }
+    public bool IsFamiDash { get; private set; }
     public string RomSha256 { get; private set; } = string.Empty;
     public bool IsPaused => _paused;
     public bool IsAudioEnabled { get; private set; }
@@ -120,6 +125,7 @@ internal sealed class NesEmulator : IDisposable
 
             RomSha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(absolutePath)));
             IsSmbWorld = RomSha256 == SmbWorldSha256;
+            IsFamiDash = RomSha256 == FamiDashSha256;
             Trace("LoadROM");
             MesenApi.LoadROM(absolutePath, string.Empty);
             Trace("DebugInitialize");
@@ -188,6 +194,12 @@ internal sealed class NesEmulator : IDisposable
                 scrollY = 0;
                 scrollSource = "SMB RAM gameplay viewport";
             }
+            else if (IsFamiDash && TryGetFamiDashViewport(ram, out int famiDashX, out int famiDashY))
+            {
+                scrollX = famiDashX;
+                scrollY = famiDashY;
+                scrollSource = "FamiDash RAM logical viewport";
+            }
             else
             {
                 (scrollX, scrollY, bool filtered) = _viewportStabilizer.Update(rawScrollX, rawScrollY);
@@ -214,6 +226,39 @@ internal sealed class NesEmulator : IDisposable
                 Sequence = ++_sequence
             };
         }
+    }
+
+    internal static bool TryGetFamiDashViewport(byte[] ram, out int scrollX, out int scrollY)
+    {
+        scrollX = 0;
+        scrollY = 0;
+        if (ram.Length <= FamiDashScrollYAddress + 1)
+        {
+            return false;
+        }
+
+        byte gameState = ram[FamiDashGameStateAddress];
+        if (gameState == 0x02)
+        {
+            // FamiDash stores extended NES coordinates. Each horizontal page is
+            // 256 pixels; vertical pages use the PPU's 256-line address space,
+            // whose visible portion is 240 lines.
+            scrollX = ((ram[FamiDashScrollXAddress + 1] & 0x01) << 8) |
+                ram[FamiDashScrollXAddress];
+            int extendedY = ram[FamiDashScrollYAddress] |
+                (ram[FamiDashScrollYAddress + 1] << 8);
+            scrollY = ((extendedY >> 8) & 0x01) * 240 + (extendedY & 0xFF);
+            return true;
+        }
+
+        // The title and level-selection IRQ tables temporarily write parallax
+        // scrolls such as X=256 and Y=239. Their logical base viewport is (0,0).
+        if (gameState is 0x01 or 0x05 or 0x06)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     public void SetButton(NesButton button, bool pressed)

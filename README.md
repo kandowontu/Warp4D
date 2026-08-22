@@ -34,6 +34,8 @@ For the exact SMB profile, the viewport is taken from SMB's stable screen-positi
 
 For other games, a temporal viewport filter rejects one-frame PPU scroll values written for raster splits while preserving normal continuous scrolling and persistent scene transitions. This keeps menus such as FamiDash's title screen anchored instead of jumping between nametable pages.
 
+The exact FamiDash build with SHA-256 `FDCC6C107CC64A245CE8F07188CBB50558EF435B908105F4CC88004D205BDA26` uses its logical RAM viewport directly. Its title and level-select screens stay fixed at their intended origin, while gameplay uses FamiDash's extended horizontal and vertical scroll coordinates.
+
 The SMB title-screen attract demo is recognized as an active level scene, so its bushes, hills, blocks, pipes, and other detected scenery use the same 4D profile as normal gameplay. The static title screen remains 2D until the demo timer actually expires.
 
 Gameplay keys remain routed to the NES while any Warp4D control has focus, including the auto-cycle checkbox and projection sliders.
