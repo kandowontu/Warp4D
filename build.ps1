@@ -13,6 +13,9 @@ if (-not (Test-Path -LiteralPath $core)) {
 
 New-Item -ItemType Directory -Path $release -Force | Out-Null
 dotnet publish $project -c Release -r win-x64 --self-contained true -o $publish
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet publish failed with exit code $LASTEXITCODE."
+}
 
 Copy-Item -LiteralPath (Join-Path $publish 'Warp4D.exe') -Destination (Join-Path $release 'Warp4D.exe') -Force
 Copy-Item -LiteralPath (Join-Path $projectDirectory 'LICENSE.txt') -Destination (Join-Path $release 'LICENSE.txt') -Force
