@@ -401,6 +401,25 @@ internal static class SmokeTest
                 gameEditor.Show();
                 Application.DoEvents();
                 gameEditor.SelectGamePixelForTest(capturedGameX, capturedGameY);
+                (int additionalGameX, int additionalGameY) = FindDifferentVisiblePattern(
+                    frame,
+                    emulator.IsSmbWorld,
+                    capturedSignature);
+                gameEditor.SelectGamePixelForTest(additionalGameX, additionalGameY, additive: true);
+                if (gameEditor.SelectedCellCountForTest != 2 ||
+                    gameEditor.SelectedPatternCountForTest != 2)
+                {
+                    throw new InvalidOperationException(
+                        "The game-profile creator did not preserve an additive multi-cell selection.");
+                }
+                gameEditor.DragSelectGamePixelsForTest(32, 64, 112, 64);
+                if (gameEditor.SelectedCellCountForTest < 5)
+                {
+                    throw new InvalidOperationException(
+                        "The game-profile creator did not continuously select cells across a pointer drag.");
+                }
+                gameEditor.SelectGamePixelForTest(capturedGameX, capturedGameY);
+                gameEditor.SelectGamePixelForTest(additionalGameX, additionalGameY, additive: true);
                 Application.DoEvents();
                 gameEditor.DrawToBitmap(gameEditorPreview, new Rectangle(Point.Empty, gameEditorPreview.Size));
                 gameEditorPreview.Save(gameEditorPreviewPath, ImageFormat.Png);
@@ -544,6 +563,7 @@ internal static class SmokeTest
                 AutoCycleValidated = true,
                 UserProfileEditorValidated = true,
                 GameProfileCreatorValidated = true,
+                GameProfileMultiSelectionValidated = true,
                 AttractDemoSceneryValidated = true,
                 ProfileObjectClasses = Enum.GetValues<SceneObjectKind>().Length,
                 ExportedProfile = exportedProfilePath,
@@ -603,6 +623,29 @@ internal static class SmokeTest
         {
             throw new InvalidOperationException("The FamiDash gameplay viewport did not decode its extended RAM coordinates.");
         }
+    }
+
+    private static (int GameX, int GameY) FindDifferentVisiblePattern(
+        NesFrame frame,
+        bool exactSmbProfile,
+        MetatileSignature excluded)
+    {
+        for (int gameY = exactSmbProfile ? 32 : 0; gameY < 240; gameY += 16)
+        for (int gameX = 0; gameX < 256; gameX += 16)
+        {
+            int worldPixelX = frame.ScrollX + gameX;
+            int worldPixelY = frame.ScrollY + gameY;
+            int worldTileX = (worldPixelX / 8) & ~1;
+            int worldTileY = (worldPixelY / 8) & ~1;
+            MetatileSignature candidate = MetatileSignature.Read(frame, worldTileX, worldTileY);
+            if (!candidate.Key.Equals(excluded.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                return (gameX, gameY);
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The captured viewport did not contain two distinct metatile patterns for multi-selection validation.");
     }
 
     private static SmbScene CloneScene(SmbScene source)
